@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from ..i18n import tr
 from . import spatial
 from .audio_io import resample
 
@@ -163,8 +164,8 @@ def save(path: str, out: np.ndarray, cfg: ExportSettings, log=_noop) -> list[str
     if len(names) > 2:
         txt = base + f"_{cfg.layout}_channels.txt"
         with open(txt, "w", encoding="utf-8") as fh:
-            fh.write(f"REMASTRA — format {cfg.layout} ({len(names)} canaux)\n")
-            fh.write(f"{spatial.LAYOUT_DESC[cfg.layout]}\n\nOrdre des canaux :\n")
+            fh.write(tr("REMASTRA — format {l} ({n} canaux)").format(l=tr(cfg.layout), n=len(names)) + "\n")
+            fh.write(f"{tr(spatial.LAYOUT_DESC[cfg.layout])}\n\n{tr('Ordre des canaux :')}\n")
             for i, nm in enumerate(names):
                 fh.write(f"  {i + 1:2d}  {nm}\n")
         written.append(txt)

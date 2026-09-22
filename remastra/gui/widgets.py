@@ -10,6 +10,7 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QLinearGradient, QPainter, QPa
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QSizePolicy, QSlider, QVBoxLayout,
                                QWidget)
 
+from ..i18n import tr
 from . import theme as T
 
 
@@ -100,7 +101,7 @@ class WaveformView(QWidget):
         self.playhead = 0.0
         self.sel = None
         self._drag = None
-        self.placeholder = "Glissez un fichier audio ou vidéo ici"
+        self.placeholder = tr("Glissez un fichier audio ou vidéo ici")
         self.setMouseTracking(True)
 
     @staticmethod
@@ -262,7 +263,7 @@ class SpectrumView(QWidget):
         series = [s for s in (self.a, self.b) if s is not None]
         if not series:
             p.setPen(QColor(T.MUTED))
-            p.drawText(self.rect(), Qt.AlignCenter, "Spectre — lancez une analyse")
+            p.drawText(self.rect(), Qt.AlignCenter, tr("Spectre — lancez une analyse"))
             p.end()
             return
         top = max(np.max(s[1]) for s in series) + 3
@@ -323,9 +324,9 @@ class SpectrumView(QWidget):
             p.drawPath(path)
         # Légende
         p.setFont(QFont("Segoe UI", 9, QFont.DemiBold))
-        items = ([("Avant", "#8A90B4")] if self.a is not None and self.b is not None else []) + \
-            ([("Après", T.ACCENT1)] if self.b is not None else []) + \
-            ([("EQ IA", T.ACCENT3)] if self.eq is not None else [])
+        items = ([(tr("Avant"), "#8A90B4")] if self.a is not None and self.b is not None else []) + \
+            ([(tr("Après"), T.ACCENT1)] if self.b is not None else []) + \
+            ([(tr("EQ IA"), T.ACCENT3)] if self.eq is not None else [])
         x = L + 8
         for name, col in items:
             p.setBrush(QColor(col))
@@ -475,15 +476,15 @@ class SpeakerMap(QWidget):
             p.drawText(QRectF(x - 20, y + 12, 40, 14), Qt.AlignCenter, nm)
         p.setPen(QColor(T.MUTED))
         p.setFont(QFont("Segoe UI", 8))
-        p.drawText(QRectF(0, 2, w, 14), Qt.AlignCenter, "▲ AVANT")
+        p.drawText(QRectF(0, 2, w, 14), Qt.AlignCenter, tr("▲ AVANT"))
         p.setBrush(QColor(T.ACCENT1))
         p.setPen(Qt.NoPen)
         p.drawEllipse(QPointF(10, h - 10), 4, 4)
         p.setBrush(QColor(T.ACCENT3))
         p.drawRect(QRectF(80, h - 14, 8, 8))
         p.setPen(QColor(T.MUTED))
-        p.drawText(QPointF(18, h - 6), "Horizontal")
-        p.drawText(QPointF(92, h - 6), "Hauteur")
+        p.drawText(QPointF(18, h - 6), tr("Horizontal"))
+        p.drawText(QPointF(92, h - 6), tr("Hauteur"))
         p.end()
 
 

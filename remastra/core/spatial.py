@@ -156,6 +156,8 @@ def upmix(audio: np.ndarray, sr: int, layout: str, stems: dict | None = None) ->
     n = st.shape[1]
 
     if stems:  # --- upmix objet à partir des stems -------------------------
+        from .mega import spatial_groups
+        stems = spatial_groups(stems)   # 53 stems -> jeu principal non redondant
         z = np.zeros(n, np.float32)
         def g(k):
             s = stems.get(k)

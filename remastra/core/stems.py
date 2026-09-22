@@ -26,6 +26,21 @@ STEM_COLORS = {
     "other": "#9AA4B2",
 }
 QUALITY = {"Rapide": 0, "Haute qualité": 1, "Ultra (lent)": 4}
+MODELS = ["Demucs v4 — 8 stems (rapide)", "MVSep Mega BS-RoFormer — 53 stems"]
+
+
+def stem_label(name: str) -> str:
+    if name in STEM_LABELS:
+        return STEM_LABELS[name]
+    from . import mega
+    return mega.label(name)
+
+
+def stem_color(name: str) -> str:
+    if name in STEM_COLORS:
+        return STEM_COLORS[name]
+    from . import mega
+    return mega.color(name)
 
 _MODELS: dict = {}
 

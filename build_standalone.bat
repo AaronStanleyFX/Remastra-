@@ -8,6 +8,7 @@ set "VPY=%~dp0runtime\Scripts\python.exe"
   --icon remastra\assets\icon.ico ^
   --add-data "remastra\assets;remastra\assets" ^
   --collect-all demucs --collect-all df --collect-all pedalboard --collect-all soxr ^
+  --collect-all rotary_embedding_torch --collect-all beartype --collect-all einops ^
   --collect-submodules remastra ^
   run_remastra.py
 echo.

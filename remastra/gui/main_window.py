@@ -5,7 +5,7 @@ import os
 import tempfile
 
 import numpy as np
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QLabel, QListWidget, QMainWindow,
@@ -14,8 +14,9 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDoubleSpinBo
                                QWidget)
 
 from .. import __version__
+from ..i18n import tr, tr_msg
 from ..core import analysis as an
-from ..core import audio_io, denoise, export, mastering, spatial, stems
+from ..core import audio_io, denoise, export, mastering, mega, spatial, stems
 from . import theme as T
 from .widgets import (DropArea, LabeledSlider, Logo, MetricTile, SpeakerMap, SpectrumView,
                       WaveformView, card, label)
@@ -30,6 +31,19 @@ except Exception:  # pragma: no cover
 def fmt_time(s):
     s = max(0, s)
     return f"{int(s // 60):02d}:{s % 60:05.2f}"
+
+
+def fill(combo, keys):
+    """Remplit un QComboBox : libellé traduit, clé interne en userData."""
+    combo.clear()
+    for k in keys:
+        combo.addItem(tr(k), k)
+
+
+def select(combo, key):
+    i = combo.findData(key)
+    if i >= 0:
+        combo.setCurrentIndex(i)
 
 
 def scroll(widget):
@@ -64,6 +78,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.preview_files: dict[str, str] = {}
         self.listen = "Original"
+        self.settings = QSettings("REMASTRA", "REMASTRA")
 
         root = QWidget(objectName="Root")
         self.setCentralWidget(root)
@@ -90,6 +105,8 @@ class MainWindow(QMainWindow):
         self._setup_player()
         self._nav[0].setChecked(True)
         self._refresh_enabled()
+        self._engines_ready = False
+        self._pending = None
         QTimer.singleShot(300, self._probe_engines)
         act = QAction(self)
         act.setShortcut(QKeySequence(Qt.Key_Space))
@@ -117,10 +134,10 @@ class MainWindow(QMainWindow):
         self.lbl_time.setStyleSheet("font-family:Consolas,monospace; font-size:15px; font-weight:700; padding:0 12px;")
         h.addWidget(self.lbl_time)
         h.addSpacing(10)
-        h.addWidget(label("ÉCOUTE", "Muted"))
+        h.addWidget(label(tr("ÉCOUTE"), "Muted"))
         self.stage_btns = QButtonGroup(self)
         for i, st in enumerate(self.STAGES):
-            b = QPushButton(st, objectName="Chip")
+            b = QPushButton(tr(st), objectName="Chip")
             b.setCheckable(True)
             b.setChecked(i == 0)
             self.stage_btns.addButton(b, i)
@@ -133,7 +150,31 @@ class MainWindow(QMainWindow):
         self.vol.setValue(80)
         self.vol.setFixedWidth(110)
         h.addWidget(self.vol)
+        h.addSpacing(8)
+        from .. import i18n
+        other = "fr" if i18n.LANG == "en" else "en"
+        self.btn_lang = QPushButton(f"🌐 {i18n.LANG.upper()}", objectName="Chip")
+        self.btn_lang.setToolTip(tr("Langue") + f" → {i18n.LANGS[other]}")
+        self.btn_lang.clicked.connect(lambda: self.switch_language(other))
+        h.addWidget(self.btn_lang)
         return bar
+
+    def switch_language(self, lang):
+        """Relance REMASTRA dans l'autre langue."""
+        import sys
+
+        from PySide6.QtCore import QProcess
+        from PySide6.QtWidgets import QApplication
+
+        self.settings.setValue("lang", lang)
+        if getattr(sys, "frozen", False):
+            prog, args = sys.executable, ["--lang", lang, "--no-splash"]
+        else:
+            prog = sys.executable
+            args = ["-m", "remastra", "--lang", lang, "--no-splash"]
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if QProcess.startDetached(prog, args, root):
+            QApplication.quit()
 
     def _build_sidebar(self):
         sb = QWidget(objectName="Sidebar")
@@ -144,8 +185,8 @@ class MainWindow(QMainWindow):
         v.addWidget(label("WORKFLOW", "Muted"))
         self._nav = []
         grp = QButtonGroup(self)
-        items = ["①  Import && Analyse", "②  Débruitage IA", "③  Stems IA",
-                 "④  Remaster IA", "⑤  Export"]
+        items = [tr("①  Import && Analyse"), tr("②  Débruitage IA"), tr("③  Stems IA"),
+                 tr("④  Remaster IA"), tr("⑤  Export")]
         for i, t in enumerate(items):
             b = QPushButton(t, objectName="Nav")
             b.setCheckable(True)
@@ -157,8 +198,8 @@ class MainWindow(QMainWindow):
         c = card()
         cl = QVBoxLayout(c)
         cl.setContentsMargins(12, 12, 12, 12)
-        cl.addWidget(label("MOTEURS IA", "Muted"))
-        self.lbl_engines = label("Détection…", None, True)
+        cl.addWidget(label(tr("MOTEURS IA"), "Muted"))
+        self.lbl_engines = label(tr("Détection…"), None, True)
         self.lbl_engines.setStyleSheet("font-size:12px; line-height:150%;")
         cl.addWidget(self.lbl_engines)
         v.addWidget(c)
@@ -169,13 +210,13 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(c)
         v.setContentsMargins(14, 10, 14, 12)
         top = QHBoxLayout()
-        self.lbl_file = label("Aucun fichier chargé", "H2")
+        self.lbl_file = label(tr("Aucun fichier chargé"), "H2")
         self.lbl_fileinfo = label("", "Muted")
         top.addWidget(self.lbl_file)
         top.addSpacing(10)
         top.addWidget(self.lbl_fileinfo)
         top.addStretch()
-        self.lbl_sel = label("Astuce : cliquez pour vous déplacer, glissez pour sélectionner", "Muted")
+        self.lbl_sel = label(tr("Astuce : cliquez pour vous déplacer, glissez pour sélectionner"), "Muted")
         top.addWidget(self.lbl_sel)
         v.addLayout(top)
         self.wave = WaveformView(height=140)
@@ -189,12 +230,12 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(bar)
         v.setContentsMargins(18, 8, 18, 8)
         h = QHBoxLayout()
-        self.lbl_status = label("Prêt.", "Muted")
+        self.lbl_status = label(tr("Prêt."), "Muted")
         self.prog = QProgressBar()
         self.prog.setRange(0, 1000)
         self.prog.setFixedWidth(360)
         self.prog.setValue(0)
-        self.btn_log = QPushButton("Journal ▾", objectName="Chip")
+        self.btn_log = QPushButton(tr("Journal ▾"), objectName="Chip")
         self.btn_log.setCheckable(True)
         h.addWidget(self.lbl_status, 1)
         h.addWidget(self.prog)
@@ -223,10 +264,10 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(14)
-        self._page_header(v, "Import & Analyse",
-                          "Musique, doublage, voix, podcast, bande-son vidéo… REMASTRA analyse "
+        self._page_header(v, tr("Import & Analyse"),
+                          tr("Musique, doublage, voix, podcast, bande-son vidéo… REMASTRA analyse "
                           "le loudness (EBU R128 / ITU-R BS.1770-4), le true-peak, la dynamique "
-                          "et le spectre.")
+                          "et le spectre."))
         drop = DropArea()
         drop.setObjectName("Card")
         drop.setStyleSheet(f"QFrame#Card {{ border: 2px dashed {T.ACCENT2}; }}")
@@ -234,12 +275,12 @@ class MainWindow(QMainWindow):
         dl = QHBoxLayout(drop)
         dl.setContentsMargins(24, 22, 24, 22)
         col = QVBoxLayout()
-        col.addWidget(label("Déposez votre fichier ici", "H2"))
-        col.addWidget(label("WAV · FLAC · MP3 · OGG · OPUS · M4A · AAC · AIFF · WMA · "
-                            "MP4 · MOV · MKV (piste audio)", "Muted"))
+        col.addWidget(label(tr("Déposez votre fichier ici"), "H2"))
+        col.addWidget(label(tr("WAV · FLAC · MP3 · OGG · OPUS · M4A · AAC · AIFF · WMA · "
+                            "MP4 · MOV · MKV (piste audio)"), "Muted"))
         dl.addLayout(col)
         dl.addStretch()
-        b = QPushButton("Ouvrir un fichier…", objectName="Primary")
+        b = QPushButton(tr("Ouvrir un fichier…"), objectName="Primary")
         b.clicked.connect(self.browse)
         dl.addWidget(b)
         v.addWidget(drop)
@@ -247,12 +288,12 @@ class MainWindow(QMainWindow):
         grid = QGridLayout()
         grid.setSpacing(12)
         self.tiles = {
-            "lufs": MetricTile("Loudness intégré", "LUFS"),
+            "lufs": MetricTile(tr("Loudness intégré"), "LUFS"),
             "tp": MetricTile("True Peak", "dBTP"),
-            "lra": MetricTile("Loudness Range", "LU"),
-            "crest": MetricTile("Facteur de crête", "dB"),
-            "corr": MetricTile("Corrélation stéréo", "-1 … +1"),
-            "type": MetricTile("Contenu détecté", "analyse IA"),
+            "lra": MetricTile(tr("Loudness Range"), "LU"),
+            "crest": MetricTile(tr("Facteur de crête"), "dB"),
+            "corr": MetricTile(tr("Corrélation stéréo"), "-1 … +1"),
+            "type": MetricTile(tr("Contenu détecté"), tr("analyse IA")),
         }
         for i, t in enumerate(self.tiles.values()):
             grid.addWidget(t, 0, i)
@@ -260,7 +301,7 @@ class MainWindow(QMainWindow):
         c = card()
         cl = QVBoxLayout(c)
         cl.setContentsMargins(14, 12, 14, 12)
-        cl.addWidget(label("Spectre moyen", "H2"))
+        cl.addWidget(label(tr("Spectre moyen"), "H2"))
         self.spec_import = SpectrumView()
         cl.addWidget(self.spec_import)
         v.addWidget(c)
@@ -273,10 +314,10 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(14)
-        self._page_header(v, "Débruitage IA",
-                          "Supprime proprement le bruit derrière la voix : souffle, ventilation, "
+        self._page_header(v, tr("Débruitage IA"),
+                          tr("Supprime proprement le bruit derrière la voix : souffle, ventilation, "
                           "trafic, réverbération de bruit, ronflement secteur, clics. Le moteur "
-                          "« Isolation voix » retire même la musique et les ambiances.", "NEURAL")
+                          "« Isolation voix » retire même la musique et les ambiances."), "NEURAL")
         row = QHBoxLayout()
         row.setSpacing(14)
         c = card()
@@ -284,27 +325,27 @@ class MainWindow(QMainWindow):
         g.setContentsMargins(18, 16, 18, 16)
         g.setHorizontalSpacing(24)
         g.setVerticalSpacing(14)
-        g.addWidget(label("Moteur", "H2"), 0, 0)
+        g.addWidget(label(tr("Moteur"), "H2"), 0, 0)
         self.dn_engine = QComboBox()
-        self.dn_engine.addItems(denoise.ENGINES)
+        fill(self.dn_engine, denoise.ENGINES)
         g.addWidget(self.dn_engine, 0, 1)
-        self.dn_strength = LabeledSlider("Intensité", 0, 100, 80, " %")
-        self.dn_reduction = LabeledSlider("Réduction maximale", 6, 60, 30, " dB")
-        self.dn_residual = LabeledSlider("Fond conservé (isolation)", -60, 0, -60, " dB")
+        self.dn_strength = LabeledSlider(tr("Intensité"), 0, 100, 80, " %")
+        self.dn_reduction = LabeledSlider(tr("Réduction maximale"), 6, 60, 30, " dB")
+        self.dn_residual = LabeledSlider(tr("Fond conservé (isolation)"), -60, 0, -60, " dB")
         g.addWidget(self.dn_strength, 1, 0)
         g.addWidget(self.dn_reduction, 1, 1)
         g.addWidget(self.dn_residual, 2, 0)
         self.dn_engine.currentIndexChanged.connect(self._dn_engine_changed)
         self._dn_engine_changed()
-        g.addWidget(label("Restauration", "H2"), 3, 0, 1, 2)
-        self.dn_rumble = QCheckBox("Filtre anti-rumble (< 60 Hz)")
+        g.addWidget(label(tr("Restauration"), "H2"), 3, 0, 1, 2)
+        self.dn_rumble = QCheckBox(tr("Filtre anti-rumble (< 60 Hz)"))
         self.dn_rumble.setChecked(True)
-        self.dn_hum = QCheckBox("Anti-ronflement secteur")
+        self.dn_hum = QCheckBox(tr("Anti-ronflement secteur"))
         self.dn_hum.setChecked(True)
         self.dn_humf = QComboBox()
-        self.dn_humf.addItems(["Auto", "50 Hz", "60 Hz"])
-        self.dn_click = QCheckBox("Anti-clic / crépitements")
-        self.dn_deess = QCheckBox("De-esser (sifflantes)")
+        fill(self.dn_humf, ["Auto", "50 Hz", "60 Hz"])
+        self.dn_click = QCheckBox(tr("Anti-clic / crépitements"))
+        self.dn_deess = QCheckBox(tr("De-esser (sifflantes)"))
         g.addWidget(self.dn_rumble, 4, 0)
         hh = QHBoxLayout()
         hh.addWidget(self.dn_hum)
@@ -318,19 +359,19 @@ class MainWindow(QMainWindow):
         c2 = card()
         c2l = QVBoxLayout(c2)
         c2l.setContentsMargins(18, 16, 18, 16)
-        c2l.addWidget(label("Profil de bruit", "H2"))
-        c2l.addWidget(label("Moteur Spectral Pro : sélectionnez à la souris un passage de bruit "
+        c2l.addWidget(label(tr("Profil de bruit"), "H2"))
+        c2l.addWidget(label(tr("Moteur Spectral Pro : sélectionnez à la souris un passage de bruit "
                             "seul sur la forme d'onde pour un apprentissage précis. Sans sélection, "
                             "le profil est estimé automatiquement. Idéal voix / dialogues ; pour la "
-                            "musique, préférez les moteurs IA ou une sélection de bruit seul.", "Muted", True))
-        self.lbl_profile = label("Profil : automatique", None)
+                            "musique, préférez les moteurs IA ou une sélection de bruit seul."), "Muted", True))
+        self.lbl_profile = label(tr("Profil : automatique"), None)
         self.lbl_profile.setStyleSheet(f"color:{T.ACCENT3}; font-weight:700;")
         c2l.addWidget(self.lbl_profile)
-        b = QPushButton("Effacer la sélection")
+        b = QPushButton(tr("Effacer la sélection"))
         b.clicked.connect(self._clear_sel)
         c2l.addWidget(b)
         c2l.addStretch()
-        self.btn_denoise = QPushButton("✦  Lancer le débruitage", objectName="Primary")
+        self.btn_denoise = QPushButton(tr("✦  Lancer le débruitage"), objectName="Primary")
         self.btn_denoise.clicked.connect(self.run_denoise)
         c2l.addWidget(self.btn_denoise)
         row.addWidget(c2, 2)
@@ -339,9 +380,9 @@ class MainWindow(QMainWindow):
         return w
 
     def _dn_engine_changed(self, *_):
-        iso = self.dn_engine.currentText().startswith("IA Isolation")
+        iso = (self.dn_engine.currentData() or "").startswith("IA Isolation")
         self.dn_residual.setEnabled(iso)
-        self.dn_reduction.setEnabled(self.dn_engine.currentText().startswith("Spectral"))
+        self.dn_reduction.setEnabled((self.dn_engine.currentData() or "").startswith("Spectral"))
 
     # ------------------------------------------------------------- Stems --
     def _page_stems(self):
@@ -349,42 +390,90 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(14)
-        self._page_header(v, "Séparation de stems IA",
-                          "Voix · Batterie · Basse · Guitare · Piano · Cordes · Nappes · Synthés. "
-                          "Moteur Hybrid Transformer Demucs v4 + séparation étendue REMASTRA. "
-                          "Les stems se somment exactement au mix d'origine.", "8 STEMS")
+        self._page_header(v, tr("Séparation de stems IA"),
+                          tr("Demucs v4 : 8 stems rapides qui se somment exactement au mix. "
+                          "MVSep Mega BS-RoFormer : jusqu'à 53 instruments (voix lead, chœurs, "
+                          "grosse caisse, caisse claire, violon, violoncelle, trompette, saxophone, "
+                          "orgue, harpe…)."), "8 · 53 STEMS")
         c = card()
-        h = QHBoxLayout(c)
-        h.setContentsMargins(18, 14, 18, 14)
-        h.addWidget(label("Source", "Muted"))
+        g = QGridLayout(c)
+        g.setContentsMargins(18, 14, 18, 14)
+        g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(10)
+        g.addWidget(label(tr("Modèle"), "Muted"), 0, 0)
+        self.st_model = QComboBox()
+        fill(self.st_model, stems.MODELS)
+        g.addWidget(self.st_model, 0, 1)
+        g.addWidget(label("Source", "Muted"), 0, 2)
         self.st_src = QComboBox()
-        self.st_src.addItems(["Auto (dernière étape)", "Original", "Débruité"])
-        h.addWidget(self.st_src)
-        h.addSpacing(16)
-        h.addWidget(label("Qualité", "Muted"))
-        self.st_q = QComboBox()
-        self.st_q.addItems(list(stems.QUALITY))
-        self.st_q.setCurrentIndex(1)
-        h.addWidget(self.st_q)
-        h.addSpacing(16)
-        self.st_ext = QCheckBox("Séparation étendue (cordes / nappes / synthés)")
-        self.st_ext.setChecked(True)
-        h.addWidget(self.st_ext)
-        h.addStretch()
-        self.btn_stems = QPushButton("✦  Séparer les stems", objectName="Primary")
+        fill(self.st_src, ["Auto (dernière étape)", "Original", "Débruité"])
+        g.addWidget(self.st_src, 0, 3)
+        self.btn_stems = QPushButton(tr("✦  Séparer les stems"), objectName="Primary")
         self.btn_stems.clicked.connect(self.run_stems)
-        h.addWidget(self.btn_stems)
+        g.addWidget(self.btn_stems, 0, 5)
+        g.setColumnStretch(4, 1)
+
+        # Options Demucs
+        self.st_demucs_opts = QWidget()
+        hd = QHBoxLayout(self.st_demucs_opts)
+        hd.setContentsMargins(0, 0, 0, 0)
+        hd.addWidget(label(tr("Qualité"), "Muted"))
+        self.st_q = QComboBox()
+        fill(self.st_q, list(stems.QUALITY))
+        self.st_q.setCurrentIndex(1)
+        hd.addWidget(self.st_q)
+        hd.addSpacing(16)
+        self.st_ext = QCheckBox(tr("Séparation étendue (cordes / nappes / synthés)"))
+        self.st_ext.setChecked(True)
+        hd.addWidget(self.st_ext)
+        hd.addStretch()
+        g.addWidget(self.st_demucs_opts, 1, 0, 1, 6)
+
+        # Options MVSep Mega 53 stems
+        self.st_mega_opts = QWidget()
+        gm = QGridLayout(self.st_mega_opts)
+        gm.setContentsMargins(0, 0, 0, 0)
+        gm.setHorizontalSpacing(12)
+        gm.addWidget(label(tr("Mémoire"), "Muted"), 0, 0)
+        self.st_mem = QComboBox()
+        fill(self.st_mem, list(mega.MEMORY_MODES))
+        gm.addWidget(self.st_mem, 0, 1)
+        self.st_hide = QCheckBox(tr("Masquer les instruments absents du morceau"))
+        self.st_hide.setChecked(True)
+        gm.addWidget(self.st_hide, 0, 2, 1, 2)
+        gm.addWidget(label(tr("Fichier"), "Muted"), 1, 0)
+        self.lbl_mega = label("", None)
+        gm.addWidget(self.lbl_mega, 1, 1, 1, 1)
+        self.btn_mega_dl = QPushButton(tr("⬇ Télécharger le modèle (1,4 Go)"))
+        self.btn_mega_dl.clicked.connect(self.download_mega)
+        self.btn_mega_pick = QPushButton(tr("Choisir un .ckpt…"))
+        self.btn_mega_pick.clicked.connect(self.pick_mega)
+        gm.addWidget(self.btn_mega_dl, 1, 2)
+        gm.addWidget(self.btn_mega_pick, 1, 3)
+        gm.setColumnStretch(1, 1)
+        note = label(tr("Les 53 stems se recouvrent (ex. « Voix » = voix lead + chœurs). REMASTRA "
+                     "active par défaut un jeu principal (voix, batterie, basse, guitare, piano, "
+                     "cordes, synthé + résidu) qui se somme exactement au mix ; les instruments "
+                     "détaillés sont en mute. GPU NVIDIA 16 Go recommandé, très lent sur CPU."),
+                     "Muted", True)
+        gm.addWidget(note, 2, 0, 1, 4)
+        g.addWidget(self.st_mega_opts, 2, 0, 1, 6)
+        self.st_model.currentIndexChanged.connect(self._stem_model_changed)
+        self.mega_ckpt = mega.find_ckpt(self.settings.value("mega_ckpt", "", str) or None)
+        self._stem_model_changed()
+        self._update_mega_label()
         v.addWidget(c)
+
         self.stems_box = card()
         self.stems_lay = QVBoxLayout(self.stems_box)
         self.stems_lay.setContentsMargins(14, 12, 14, 12)
         self.stems_lay.setSpacing(8)
-        self.stems_lay.addWidget(label("Aucun stem pour l'instant.", "Muted"))
+        self.stems_lay.addWidget(label(tr("Aucun stem pour l'instant."), "Muted"))
         v.addWidget(self.stems_box)
         hb = QHBoxLayout()
-        self.btn_stem_mix = QPushButton("Écouter le mix des stems")
+        self.btn_stem_mix = QPushButton(tr("Écouter le mix des stems"))
         self.btn_stem_mix.clicked.connect(self.update_stem_mix)
-        self.btn_stem_to_master = QPushButton("Envoyer le mix au Remaster →")
+        self.btn_stem_to_master = QPushButton(tr("Envoyer le mix au Remaster →"))
         self.btn_stem_to_master.clicked.connect(self._stem_mix_to_master)
         hb.addWidget(self.btn_stem_mix)
         hb.addWidget(self.btn_stem_to_master)
@@ -393,14 +482,57 @@ class MainWindow(QMainWindow):
         v.addStretch()
         return w
 
+    def _is_mega(self):
+        return self.st_model.currentIndex() == 1
+
+    def _stem_model_changed(self, *_):
+        self.st_demucs_opts.setVisible(not self._is_mega())
+        self.st_mega_opts.setVisible(self._is_mega())
+
+    def _update_mega_label(self):
+        if self.mega_ckpt:
+            self.lbl_mega.setText("✔ " + self.mega_ckpt)
+            self.lbl_mega.setStyleSheet(f"color:{T.OK}; font-weight:600;")
+            self.btn_mega_dl.setVisible(False)
+        else:
+            self.lbl_mega.setText(tr("Modèle absent — {f}").format(f=mega.CKPT_NAME))
+            self.lbl_mega.setStyleSheet(f"color:{T.WARN}; font-weight:600;")
+            self.btn_mega_dl.setVisible(True)
+
+    def pick_mega(self):
+        p, _ = QFileDialog.getOpenFileName(self, tr("Modèle MVSep Mega 53 stems"), "",
+                                           tr("Checkpoint (*.ckpt *.pth *.pt)"))
+        if p:
+            self.mega_ckpt = p
+            self.settings.setValue("mega_ckpt", p)
+            self._update_mega_label()
+
+    def download_mega(self):
+        def done(path):
+            self.mega_ckpt = path
+            self.settings.setValue("mega_ckpt", path)
+            self._update_mega_label()
+        self._run(mega.download, done, title=tr("Téléchargement du modèle 53 stems"))
+
     def _build_stem_rows(self):
         while self.stems_lay.count():
             it = self.stems_lay.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
         self.stem_ctrl = {}
+        active = mega.default_active(self.stems)
+        is_mega = mega.is_mega_set(self.stems)
+        header_done = False
+        if is_mega:
+            self.stems_lay.addWidget(label(tr("STEMS PRINCIPAUX — se somment au mix d'origine"), "Muted"))
         for name, a in self.stems.items():
-            col = stems.STEM_COLORS.get(name, T.ACCENT1)
+            if is_mega and not header_done and name not in active:
+                hdr = label(tr("INSTRUMENTS DÉTAILLÉS ({n}) — se recouvrent avec les stems principaux, "
+                               "en mute par défaut").format(n=len(self.stems) - len(active)), "Muted")
+                hdr.setStyleSheet("margin-top:10px;")
+                self.stems_lay.addWidget(hdr)
+                header_done = True
+            col = stems.stem_color(name)
             row = QWidget()
             row.setFixedHeight(54)
             h = QHBoxLayout(row)
@@ -409,8 +541,8 @@ class MainWindow(QMainWindow):
             bar.setFixedSize(5, 46)
             bar.setStyleSheet(f"background:{col}; border-radius:2px;")
             h.addWidget(bar)
-            nm = QLabel(stems.STEM_LABELS.get(name, name))
-            nm.setFixedWidth(120)
+            nm = QLabel(tr(stems.stem_label(name)))
+            nm.setFixedWidth(150)
             nm.setStyleSheet("font-weight:700; font-size:14px;")
             h.addWidget(nm)
             wv = WaveformView(height=46, color=col, normalize=True)
@@ -424,6 +556,7 @@ class MainWindow(QMainWindow):
                 b.setCheckable(True)
                 b.setFixedWidth(34)
                 h.addWidget(b)
+            mute.setChecked(name not in active)
             gain = QSlider(Qt.Horizontal)
             gain.setRange(-240, 120)
             gain.setValue(0)
@@ -433,7 +566,7 @@ class MainWindow(QMainWindow):
             gain.valueChanged.connect(lambda val, l=gl: l.setText(f"{val / 10:+.1f} dB"))
             h.addWidget(gain)
             h.addWidget(gl)
-            ex = QPushButton("Exporter")
+            ex = QPushButton(tr("Exporter"))
             ex.clicked.connect(lambda _=False, n=name: self.export_single_stem(n))
             h.addWidget(ex)
             self.stems_lay.addWidget(row)
@@ -445,10 +578,10 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(w)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(14)
-        self._page_header(v, "Remastérisation IA",
-                          "Analyse intelligente → EQ corrective à phase linéaire, compression "
+        self._page_header(v, tr("Remastérisation IA"),
+                          tr("Analyse intelligente → EQ corrective à phase linéaire, compression "
                           "multibande adaptative, excitateur harmonique, image stéréo M/S, glue, "
-                          "normalisation loudness et limiteur true-peak x4.", "AI MASTER")
+                          "normalisation loudness et limiteur true-peak x4."), "AI MASTER")
         row = QHBoxLayout()
         row.setSpacing(14)
         c = card()
@@ -457,48 +590,49 @@ class MainWindow(QMainWindow):
         g.setHorizontalSpacing(22)
         g.setVerticalSpacing(12)
         self.m_src = QComboBox()
-        self.m_src.addItems(["Auto (dernière étape)", "Original", "Débruité", "Mix stems"])
+        fill(self.m_src, ["Auto (dernière étape)", "Original", "Débruité", "Mix stems"])
         self.m_profile = QComboBox()
-        self.m_profile.addItems(list(mastering.PROFILES))
+        fill(self.m_profile, list(mastering.PROFILES))
         self.m_loud = QComboBox()
-        self.m_loud.addItems(list(mastering.LOUDNESS_TARGETS) + ["Personnalisé…"])
+        fill(self.m_loud, list(mastering.LOUDNESS_TARGETS) + ["Personnalisé…"])
         self.m_custom = QDoubleSpinBox()
         self.m_custom.setRange(-40, -5)
         self.m_custom.setValue(-14)
         self.m_custom.setSuffix(" LUFS")
         self.m_custom.setEnabled(False)
-        self.m_loud.currentTextChanged.connect(lambda t: self.m_custom.setEnabled(t == "Personnalisé…"))
+        self.m_loud.currentIndexChanged.connect(
+            lambda _i: self.m_custom.setEnabled(self.m_loud.currentData() == "Personnalisé…"))
         self.m_ceiling = QDoubleSpinBox()
         self.m_ceiling.setRange(-6, 0)
         self.m_ceiling.setSingleStep(0.1)
         self.m_ceiling.setValue(-1.0)
         self.m_ceiling.setSuffix(" dBTP")
         self.m_char = QComboBox()
-        self.m_char.addItems(mastering.CHARACTERS)
-        pairs = [("Source", self.m_src), ("Profil", self.m_profile), ("Cible loudness", self.m_loud),
-                 ("LUFS perso", self.m_custom), ("Plafond true-peak", self.m_ceiling),
-                 ("Caractère", self.m_char)]
+        fill(self.m_char, mastering.CHARACTERS)
+        pairs = [(tr("Source"), self.m_src), (tr("Profil"), self.m_profile), (tr("Cible loudness"), self.m_loud),
+                 (tr("LUFS perso"), self.m_custom), (tr("Plafond true-peak"), self.m_ceiling),
+                 (tr("Caractère"), self.m_char)]
         for i, (t, wd) in enumerate(pairs):
             g.addWidget(label(t, "Muted"), i // 2 * 2, i % 2)
             g.addWidget(wd, i // 2 * 2 + 1, i % 2)
-        self.m_int = LabeledSlider("Correction EQ IA", 0, 100, 70, " %")
+        self.m_int = LabeledSlider(tr("Correction EQ IA"), 0, 100, 70, " %")
         self.m_comp = LabeledSlider("Compression", 0, 100, 50, " %")
-        self.m_exc = LabeledSlider("Excitateur / Air", 0, 100, 20, " %")
-        self.m_width = LabeledSlider("Largeur stéréo", 50, 150, 100, " %")
-        self.m_mono = LabeledSlider("Basses mono sous", 0, 250, 120, " Hz", 10)
+        self.m_exc = LabeledSlider(tr("Excitateur / Air"), 0, 100, 20, " %")
+        self.m_width = LabeledSlider(tr("Largeur stéréo"), 50, 150, 100, " %")
+        self.m_mono = LabeledSlider(tr("Basses mono sous"), 0, 250, 120, " Hz", 10)
         sl = [self.m_int, self.m_comp, self.m_exc, self.m_width, self.m_mono]
         for i, s in enumerate(sl):
             g.addWidget(s, 6 + i // 2, i % 2)
         rh = QHBoxLayout()
-        self.btn_ref = QPushButton("Charger une référence…")
-        self.btn_ref.setToolTip("Mastering par référence : REMASTRA reproduit l'équilibre "
-                                "tonal, le loudness et la largeur d'un morceau de référence.")
+        self.btn_ref = QPushButton(tr("Charger une référence…"))
+        self.btn_ref.setToolTip(tr("Mastering par référence : REMASTRA reproduit l'équilibre "
+                                "tonal, le loudness et la largeur d'un morceau de référence."))
         self.btn_ref.clicked.connect(self.load_reference)
-        self.lbl_ref = label("Aucune référence", "Muted")
+        self.lbl_ref = label(tr("Aucune référence"), "Muted")
         rh.addWidget(self.btn_ref)
         rh.addWidget(self.lbl_ref, 1)
         g.addLayout(rh, 9, 0, 1, 2)
-        self.btn_master = QPushButton("✦  Remastériser avec l'IA", objectName="Primary")
+        self.btn_master = QPushButton(tr("✦  Remastériser avec l'IA"), objectName="Primary")
         self.btn_master.clicked.connect(self.run_master)
         g.addWidget(self.btn_master, 10, 0, 1, 2)
         row.addWidget(c, 5)
@@ -508,21 +642,21 @@ class MainWindow(QMainWindow):
         tiles.setSpacing(10)
         self.mt = {k: MetricTile(t, u) for k, t, u in [
             ("lufs", "Loudness", "LUFS"), ("tp", "True Peak", "dBTP"),
-            ("lra", "LRA", "LU"), ("crest", "Crête", "dB")]}
+            ("lra", "LRA", "LU"), ("crest", tr("Crête"), "dB")]}
         for i, t in enumerate(self.mt.values()):
             tiles.addWidget(t, 0, i)
         right.addLayout(tiles)
         c3 = card()
         c3l = QVBoxLayout(c3)
         c3l.setContentsMargins(14, 12, 14, 12)
-        c3l.addWidget(label("Spectre avant / après", "H2"))
+        c3l.addWidget(label(tr("Spectre avant / après"), "H2"))
         self.spec_master = SpectrumView()
         c3l.addWidget(self.spec_master)
         right.addWidget(c3)
         c4 = card()
         c4l = QVBoxLayout(c4)
         c4l.setContentsMargins(14, 12, 14, 12)
-        c4l.addWidget(label("Décisions du moteur IA", "H2"))
+        c4l.addWidget(label(tr("Décisions du moteur IA"), "H2"))
         self.decisions = QListWidget()
         self.decisions.setMinimumHeight(150)
         c4l.addWidget(self.decisions)
@@ -541,8 +675,8 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(14)
         self._page_header(v, "Export",
-                          "WAV (PCM 16/24 bits, 32 bits float, RF64 > 4 Go) ou FLAC sans perte "
-                          "(16/24 bits). Du mono jusqu'au Dolby Atmos 9.1.6 avec spatialisation IA.",
+                          tr("WAV (PCM 16/24 bits, 32 bits float, RF64 > 4 Go) ou FLAC sans perte "
+                          "(16/24 bits). Du mono jusqu'au Dolby Atmos 9.1.6 avec spatialisation IA."),
                           "LOSSLESS")
         row = QHBoxLayout()
         row.setSpacing(14)
@@ -552,8 +686,8 @@ class MainWindow(QMainWindow):
         g.setVerticalSpacing(12)
         g.addWidget(label("Source", "Muted"), 0, 0)
         self.x_src = QComboBox()
-        self.x_src.addItems(["Master (Remaster IA)", "Voix / audio débruité", "Original",
-                             "Mix des stems", "Stems séparés (1 fichier par stem)"])
+        fill(self.x_src, ["Master (Remaster IA)", "Voix / audio débruité", "Original",
+                          "Mix des stems", "Stems séparés (1 fichier par stem)"])
         g.addWidget(self.x_src, 0, 1, 1, 3)
         g.addWidget(label("Format", "Muted"), 1, 0)
         self.x_wav = QRadioButton("WAV")
@@ -564,24 +698,24 @@ class MainWindow(QMainWindow):
         fh.addWidget(self.x_flac)
         fh.addStretch()
         g.addLayout(fh, 1, 1)
-        g.addWidget(label("Résolution", "Muted"), 1, 2)
+        g.addWidget(label(tr("Résolution"), "Muted"), 1, 2)
         self.x_bits = QComboBox()
         g.addWidget(self.x_bits, 1, 3)
-        g.addWidget(label("Fréquence", "Muted"), 2, 0)
+        g.addWidget(label(tr("Fréquence"), "Muted"), 2, 0)
         self.x_sr = QComboBox()
         for s in export.SAMPLE_RATES:
             self.x_sr.addItem(f"{s / 1000:g} kHz", s)
         self.x_sr.setCurrentIndex(1)
         g.addWidget(self.x_sr, 2, 1)
-        self.x_dither = QCheckBox("Dither TPDF + noise shaping")
+        self.x_dither = QCheckBox(tr("Dither TPDF + noise shaping"))
         self.x_dither.setChecked(True)
         g.addWidget(self.x_dither, 2, 2, 1, 2)
-        g.addWidget(label("Canaux", "H2"), 3, 0, 1, 4)
+        g.addWidget(label(tr("Canaux"), "H2"), 3, 0, 1, 4)
         lg = QGridLayout()
         lg.setSpacing(8)
         self.layout_grp = QButtonGroup(self)
         for i, name in enumerate(spatial.LAYOUTS):
-            b = QPushButton(name, objectName="LayoutBtn")
+            b = QPushButton(tr(name), objectName="LayoutBtn")
             b.setCheckable(True)
             b.setMinimumHeight(52)
             self.layout_grp.addButton(b, i)
@@ -591,17 +725,17 @@ class MainWindow(QMainWindow):
         g.addLayout(lg, 4, 0, 1, 4)
         self.lbl_layout = label("", "Muted", True)
         g.addWidget(self.lbl_layout, 5, 0, 1, 4)
-        self.x_usestems = QCheckBox("Spatialisation objet à partir des stems IA (si disponibles)")
+        self.x_usestems = QCheckBox(tr("Spatialisation objet à partir des stems IA (si disponibles)"))
         self.x_usestems.setChecked(True)
         g.addWidget(self.x_usestems, 6, 0, 1, 4)
-        self.btn_export = QPushButton("⬇  Exporter", objectName="Primary")
+        self.btn_export = QPushButton(tr("⬇  Exporter"), objectName="Primary")
         self.btn_export.clicked.connect(self.run_export)
         g.addWidget(self.btn_export, 7, 0, 1, 4)
         row.addWidget(c, 3)
         c2 = card()
         c2l = QVBoxLayout(c2)
         c2l.setContentsMargins(14, 12, 14, 12)
-        c2l.addWidget(label("Configuration d'écoute", "H2"))
+        c2l.addWidget(label(tr("Configuration d'écoute"), "H2"))
         self.spk = SpeakerMap()
         c2l.addWidget(self.spk, 1)
         row.addWidget(c2, 2)
@@ -615,15 +749,15 @@ class MainWindow(QMainWindow):
     def _fmt_changed(self, *_):
         fmt = "WAV" if self.x_wav.isChecked() else "FLAC"
         self.x_bits.clear()
-        self.x_bits.addItems(export.BIT_DEPTHS[fmt])
+        fill(self.x_bits, export.BIT_DEPTHS[fmt])
         self._layout_changed(self.layout_grp.checkedId())
 
     def _layout_changed(self, i):
         name = list(spatial.LAYOUTS)[max(0, i)]
         self.spk.set_layout(spatial.LAYOUTS[name])
-        txt = spatial.LAYOUT_DESC[name]
+        txt = tr(spatial.LAYOUT_DESC[name])
         if self.x_flac.isChecked() and len(spatial.LAYOUTS[name]) > 8:
-            txt += "  —  FLAC est limité à 8 canaux : export multi-mono (1 FLAC par canal)."
+            txt += tr("  —  FLAC est limité à 8 canaux : export multi-mono (1 FLAC par canal).")
         self.lbl_layout.setText(txt)
 
     # ============================================================ Player ==
@@ -658,7 +792,7 @@ class MainWindow(QMainWindow):
 
     def set_listen(self, stage):
         if self.audio.get(stage) is None:
-            self.status(f"« {stage} » n'est pas encore disponible.")
+            self.status(f"« {tr(stage)} » n'est pas encore disponible.")
             self.stage_btns.button(self.STAGES.index(self.listen)).setChecked(True)
             return
         self.listen = stage
@@ -695,21 +829,22 @@ class MainWindow(QMainWindow):
 
     def _on_selection(self, a, b):
         self.noise_sel = (a, b)
-        self.lbl_sel.setText(f"Sélection : {fmt_time(a)} → {fmt_time(b)}")
-        self.lbl_profile.setText(f"Profil : sélection {a:.2f}s – {b:.2f}s")
+        self.lbl_sel.setText(tr("Sélection : {a} → {b}").format(a=fmt_time(a), b=fmt_time(b)))
+        self.lbl_profile.setText(tr("Profil : sélection {a}s – {b}s").format(a=f"{a:.2f}", b=f"{b:.2f}"))
 
     def _clear_sel(self):
         self.noise_sel = None
         self.wave.sel = None
         self.wave.update()
-        self.lbl_profile.setText("Profil : automatique")
-        self.lbl_sel.setText("Astuce : cliquez pour vous déplacer, glissez pour sélectionner")
+        self.lbl_profile.setText(tr("Profil : automatique"))
+        self.lbl_sel.setText(tr("Astuce : cliquez pour vous déplacer, glissez pour sélectionner"))
 
     # ============================================================ Actions ==
     def status(self, msg):
-        self.lbl_status.setText(msg)
+        self.lbl_status.setText(tr_msg(msg))
 
     def log(self, msg):
+        msg = tr_msg(msg)
         self.logbox.appendPlainText(msg)
         first = msg.strip().splitlines()[0] if msg.strip() else ""
         if first and not first.startswith("Traceback"):
@@ -723,8 +858,15 @@ class MainWindow(QMainWindow):
         self.btn_stem_mix.setEnabled(bool(self.stems) and not busy)
         self.btn_stem_to_master.setEnabled(bool(self.stems) and not busy)
 
-    def _run(self, fn, on_done, *args, title="Traitement", **kw):
+    def _run(self, fn, on_done, *args, title=None, **kw):
+        title = title or tr("Traitement")
         if self.worker and self.worker.isRunning():
+            return
+        if not self._engines_ready:
+            # PyTorch est en cours d'import dans un autre thread : un import
+            # concurrent casserait scipy/torch. On lance la tâche juste après.
+            self._pending = (fn, on_done, args, dict(kw, title=title))
+            self.status(tr("Initialisation des moteurs IA…"))
             return
         self.prog.setValue(0)
         self.status(f"{title}…")
@@ -733,7 +875,7 @@ class MainWindow(QMainWindow):
         self.worker.progress.connect(lambda p: self.prog.setValue(int(p * 1000)))
         self.worker.log.connect(self.log)
         self.worker.done.connect(lambda r: (on_done(r), self.prog.setValue(1000),
-                                            self.status(f"{title} terminé ✔"),
+                                            self.status(tr("{t} terminé ✔").format(t=title)),
                                             self._refresh_enabled()))
         self.worker.failed.connect(self._failed)
         self.worker.finished.connect(self._refresh_enabled)
@@ -742,32 +884,55 @@ class MainWindow(QMainWindow):
 
     def _failed(self, msg):
         self.prog.setValue(0)
-        self.status("Erreur : " + msg.splitlines()[0])
+        msg = tr_msg(msg.strip())
+        self.status(tr("Erreur : ") + (msg.splitlines() or [""])[0])
         QMessageBox.critical(self, "REMASTRA", msg)
         self._refresh_enabled()
 
     def _probe_engines(self):
         def probe(progress, log):
+            dev, vram = "cpu", 0
+            try:
+                import torch
+                dev = stems.device_name()
+                if dev == "cuda":
+                    vram = torch.cuda.get_device_properties(0).total_memory / 2 ** 30
+            except Exception:
+                pass
             return {"df": denoise.deepfilter_available(), "demucs": stems.demucs_available(),
-                    "dev": stems.device_name() if stems.demucs_available() else "cpu"}
+                    "mega": mega.available(), "dev": dev, "vram": vram}
 
         def done(r):
             ok = lambda b: f"<span style='color:{T.OK}'>●</span>" if b else f"<span style='color:{T.BAD}'>●</span>"  # noqa: E731
             self.lbl_engines.setText(
-                f"{ok(r['df'])} DeepFilterNet 3<br>{ok(r['demucs'])} Demucs v4 (stems)<br>"
+                f"{ok(r['df'])} DeepFilterNet 3<br>{ok(r['demucs'])} Demucs v4 (8 stems)<br>"
+                f"{ok(r['mega'] and bool(self.mega_ckpt))} BS-RoFormer (53 stems)<br>"
                 f"<span style='color:{T.OK}'>●</span> Spectral Pro / Master DSP<br>"
-                f"<span style='color:{T.MUTED}'>Calcul : {r['dev'].upper()}</span>")
+                f"<span style='color:{T.MUTED}'>" + tr("Calcul : {d}").format(d=r['dev'].upper())
+                + (f" · {r['vram']:.0f} {tr('Go')} VRAM" if r["vram"] else "") + "</span>")
             if not r["df"]:
-                self.dn_engine.setCurrentIndex(2 if not r["demucs"] else 0)
+                self.dn_engine.setCurrentIndex(1 if r["demucs"] else 2)
+            if r["vram"]:
+                self.st_mem.setCurrentIndex(0 if r["vram"] >= 15 else 1 if r["vram"] >= 10 else 2)
+            else:
+                self.st_mem.setCurrentIndex(2)
+        def ready():
+            self._engines_ready = True
+            if self._pending:
+                fn, on_done, args, kw = self._pending
+                self._pending = None
+                self._run(fn, on_done, *args, **kw)
+
         w = Worker(probe)
         w.done.connect(done)
+        w.finished.connect(ready)
         w.finished.connect(w.deleteLater)
         self._probe = w
         w.start()
 
     # ---------------------------------------------------------------- Open --
     def browse(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Ouvrir un fichier audio", "", audio_io.AUDIO_FILTER)
+        p, _ = QFileDialog.getOpenFileName(self, tr("Ouvrir un fichier audio"), "", tr(audio_io.AUDIO_FILTER))
         if p:
             self.open_file(p)
 
@@ -792,21 +957,21 @@ class MainWindow(QMainWindow):
             self.stems, self.master_res, self.preview_files = {}, None, {}
             self._build_stem_rows_empty()
             self.lbl_file.setText(os.path.basename(path))
-            self.lbl_fileinfo.setText(f"{sr / 1000:g} kHz · {a.shape[0]} canal(aux) · "
+            self.lbl_fileinfo.setText(f"{sr / 1000:g} kHz · {a.shape[0]} {tr('canal(aux)')} · "
                                       f"{fmt_time(a.shape[1] / sr)}")
             self._show_report(rep)
             self.set_listen("Original")
             self._on_pos(0)
             self._clear_sel()
             if rep.content == "voix":
-                self.m_profile.setCurrentText("Auto (IA)")
+                select(self.m_profile, "Auto (IA)")
 
-        self._run(job, done, title=f"Chargement de {os.path.basename(path)}")
+        self._run(job, done, title=tr_msg(f"Chargement de {os.path.basename(path)}"))
 
     def _build_stem_rows_empty(self):
         self.stems = {}
         self._build_stem_rows()
-        self.stems_lay.addWidget(label("Aucun stem pour l'instant.", "Muted"))
+        self.stems_lay.addWidget(label(tr("Aucun stem pour l'instant."), "Muted"))
 
     def _show_report(self, rep: an.Report):
         t = self.tiles
@@ -815,10 +980,11 @@ class MainWindow(QMainWindow):
         t["lra"].set(f"{rep.lra:.1f}")
         t["crest"].set(f"{rep.crest:.1f}")
         t["corr"].set(f"{rep.correlation:+.2f}", T.BAD if rep.correlation < 0 else T.TEXT)
-        t["type"].set(rep.content.capitalize(), T.ACCENT1)
+        t["type"].set(tr(rep.content).capitalize(), T.ACCENT1)
         self.spec_import.set_data((rep.spectrum_f, rep.spectrum_db))
 
     def _source(self, choice: str):
+        choice = choice or ""
         if choice.startswith("Original"):
             return self.audio["Original"]
         if choice.startswith("Débruité"):
@@ -838,26 +1004,37 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- Denoise --
     def run_denoise(self):
         cfg = denoise.DenoiseSettings(
-            engine=self.dn_engine.currentText(), strength=self.dn_strength.value(),
+            engine=self.dn_engine.currentData(), strength=self.dn_strength.value(),
             max_reduction_db=self.dn_reduction.value(), residual_db=self.dn_residual.value(),
-            dehum=self.dn_hum.isChecked(), hum_freq=self.dn_humf.currentText(),
+            dehum=self.dn_hum.isChecked(), hum_freq=self.dn_humf.currentData(),
             declick=self.dn_click.isChecked(), rumble_hp=self.dn_rumble.isChecked(),
             deess=self.dn_deess.isChecked(), noise_profile=self.noise_sel)
         src = self.audio["Original"]
         self._run(denoise.process, lambda y: self._set_stage("Débruité", y), src, self.sr, cfg,
-                  title="Débruitage")
+                  title=tr("Débruitage"))
 
     # --------------------------------------------------------------- Stems --
     def run_stems(self):
-        src = self._source(self.st_src.currentText())
+        src = self._source(self.st_src.currentData())
 
         def done(d):
             self.stems = d
             self._build_stem_rows()
             self.update_stem_mix()
 
-        self._run(stems.separate, done, src, self.sr, self.st_q.currentText(),
-                  self.st_ext.isChecked(), title="Séparation des stems")
+        if self._is_mega():
+            if not self.mega_ckpt:
+                r = QMessageBox.question(
+                    self, "REMASTRA", tr("Le modèle MVSep Mega 53 stems (1,4 Go) n'est pas encore "
+                    "installé.\n\nLe télécharger maintenant ?"))
+                if r == QMessageBox.Yes:
+                    self.download_mega()
+                return
+            self._run(mega.separate, done, src, self.sr, self.mega_ckpt, self.st_mem.currentData(),
+                      self.st_hide.isChecked(), title=tr("Séparation 53 stems (BS-RoFormer)"))
+            return
+        self._run(stems.separate, done, src, self.sr, self.st_q.currentData(),
+                  self.st_ext.isChecked(), title=tr("Séparation des stems"))
 
     def stem_mix(self):
         if not self.stems:
@@ -885,11 +1062,11 @@ class MainWindow(QMainWindow):
 
     def _stem_mix_to_master(self):
         self.update_stem_mix()
-        self.m_src.setCurrentText("Mix stems")
+        select(self.m_src, "Mix stems")
         self._nav[3].click()
 
     def export_single_stem(self, name):
-        p, _ = QFileDialog.getSaveFileName(self, "Exporter le stem",
+        p, _ = QFileDialog.getSaveFileName(self, tr("Exporter le stem"),
                                            self._default_name(f"_{name}"), "WAV (*.wav);;FLAC (*.flac)")
         if not p:
             return
@@ -900,28 +1077,28 @@ class MainWindow(QMainWindow):
         cfg.use_stems = False
         a = self.stems[name]
         self._run(lambda progress, log: export.export(p, a, self.sr, cfg, None, log),
-                  lambda r: None, title=f"Export du stem {name}")
+                  lambda r: None, title=tr_msg(f"Export du stem {tr(stems.stem_label(name))}"))
 
     # -------------------------------------------------------------- Master --
     def load_reference(self):
-        p, _ = QFileDialog.getOpenFileName(self, "Morceau de référence", "", audio_io.AUDIO_FILTER)
+        p, _ = QFileDialog.getOpenFileName(self, tr("Morceau de référence"), "", tr(audio_io.AUDIO_FILTER))
         if not p:
             return
         try:
             self.reference = audio_io.load_audio(p)
-            self.lbl_ref.setText("Référence : " + os.path.basename(p))
+            self.lbl_ref.setText(tr("Référence : ") + os.path.basename(p))
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "REMASTRA", str(e))
 
     def run_master(self):
-        src = self._source(self.m_src.currentText())
-        loud = self.m_loud.currentText()
+        src = self._source(self.m_src.currentData())
+        loud = self.m_loud.currentData()
         cfg = mastering.MasterSettings(
-            profile=self.m_profile.currentText(),
+            profile=self.m_profile.currentData(),
             loudness=loud if loud in mastering.LOUDNESS_TARGETS else "Profil (auto)",
             custom_lufs=self.m_custom.value() if loud == "Personnalisé…" else None,
             ceiling_dbtp=self.m_ceiling.value(), intensity=self.m_int.value(),
-            compression=self.m_comp.value(), character=self.m_char.currentText(),
+            compression=self.m_comp.value(), character=self.m_char.currentData(),
             exciter=self.m_exc.value(), width=self.m_width.value(),
             bass_mono_hz=self.m_mono.value(), reference=self.reference)
 
@@ -929,24 +1106,24 @@ class MainWindow(QMainWindow):
             self.master_res = res
             self.decisions.clear()
             for d in res.decisions:
-                self.decisions.addItem("✦  " + d)
+                self.decisions.addItem("✦  " + tr_msg(d))
             a, b = res.before, res.after
-            self.mt["lufs"].set(f"{b.lufs:.1f}", T.ACCENT3, f"LUFS  (avant {a.lufs:.1f})")
+            self.mt["lufs"].set(f"{b.lufs:.1f}", T.ACCENT3, f"LUFS  ({tr('avant')} {a.lufs:.1f})")
             self.mt["tp"].set(f"{b.true_peak:.1f}", T.OK if b.true_peak <= cfg.ceiling_dbtp + 0.05 else T.BAD,
-                              f"dBTP  (avant {a.true_peak:.1f})")
-            self.mt["lra"].set(f"{b.lra:.1f}", None, f"LU  (avant {a.lra:.1f})")
-            self.mt["crest"].set(f"{b.crest:.1f}", None, f"dB  (avant {a.crest:.1f})")
+                              f"dBTP  ({tr('avant')} {a.true_peak:.1f})")
+            self.mt["lra"].set(f"{b.lra:.1f}", None, f"LU  ({tr('avant')} {a.lra:.1f})")
+            self.mt["crest"].set(f"{b.crest:.1f}", None, f"dB  ({tr('avant')} {a.crest:.1f})")
             self.spec_master.set_data((a.spectrum_f, a.spectrum_db), (b.spectrum_f, b.spectrum_db),
                                       res.eq_curve)
             self._set_stage("Master", res.audio)
 
-        self._run(mastering.master, done, src, self.sr, cfg, title="Remastérisation IA")
+        self._run(mastering.master, done, src, self.sr, cfg, title=tr("Remastérisation IA"))
 
     # -------------------------------------------------------------- Export --
     def _export_cfg(self):
         fmt = "WAV" if self.x_wav.isChecked() else "FLAC"
         return export.ExportSettings(
-            fmt=fmt, bits=self.x_bits.currentText(), samplerate=self.x_sr.currentData(),
+            fmt=fmt, bits=self.x_bits.currentData(), samplerate=self.x_sr.currentData(),
             layout=list(spatial.LAYOUTS)[self.layout_grp.checkedId()],
             use_stems=self.x_usestems.isChecked(), dither=self.x_dither.isChecked())
 
@@ -957,14 +1134,14 @@ class MainWindow(QMainWindow):
 
     def run_export(self):
         cfg = self._export_cfg()
-        src = self.x_src.currentText()
+        src = self.x_src.currentData()
         ext = ".wav" if cfg.fmt == "WAV" else ".flac"
         tag = cfg.layout.replace("é", "e").replace(".", "")
         if src.startswith("Stems séparés"):
             if not self.stems:
-                QMessageBox.information(self, "REMASTRA", "Séparez d'abord les stems (étape ③).")
+                QMessageBox.information(self, "REMASTRA", tr("Séparez d'abord les stems (étape ③)."))
                 return
-            folder = QFileDialog.getExistingDirectory(self, "Dossier de destination des stems",
+            folder = QFileDialog.getExistingDirectory(self, tr("Dossier de destination des stems"),
                                                       os.path.dirname(self.path or ""))
             if not folder:
                 return
@@ -980,26 +1157,27 @@ class MainWindow(QMainWindow):
                     out += export.export(p, a, sr, cfg, None, log)
                     progress((i + 1) / len(items))
                 return out
-            self._run(job, lambda r: self._exported(r), title="Export des stems")
+            self._run(job, lambda r: self._exported(r), title=tr("Export des stems"))
             return
         audio = {"Master": self.audio["Master"], "Voix": self.audio["Débruité"],
                  "Original": self.audio["Original"], "Mix": self.audio["Mix stems"]}[src.split()[0]]
         if audio is None:
-            QMessageBox.information(self, "REMASTRA", "Cette source n'est pas encore disponible. "
-                                    "Lancez l'étape correspondante ou choisissez une autre source.")
+            QMessageBox.information(self, "REMASTRA", tr("Cette source n'est pas encore disponible. "
+                                    "Lancez l'étape correspondante ou choisissez une autre source."))
             return
-        p, _ = QFileDialog.getSaveFileName(self, "Exporter", self._default_name(f"_REMASTRA_{tag}") + ext,
+        p, _ = QFileDialog.getSaveFileName(self, tr("Exporter"), self._default_name(f"_REMASTRA_{tag}") + ext,
                                            f"{cfg.fmt} (*{ext})")
         if not p:
             return
         st = dict(self.stems) if self.stems else None
         self._run(lambda progress, log: export.export(p, audio, self.sr, cfg, st, log),
-                  self._exported, title=f"Export {cfg.fmt} {cfg.layout}")
+                  self._exported, title=f"Export {cfg.fmt} {tr(cfg.layout)}")
 
     def _exported(self, files):
         files = [f for f in files if not f.endswith(".txt")]
-        QMessageBox.information(self, "REMASTRA — Export terminé",
-                                f"{len(files)} fichier(s) exporté(s) :\n\n" + "\n".join(files[:12]) +
+        QMessageBox.information(self, tr("REMASTRA — Export terminé"),
+                                tr("{n} fichier(s) exporté(s) :").format(n=len(files)) + "\n\n" +
+                                "\n".join(files[:12]) +
                                 ("\n…" if len(files) > 12 else ""))
 
     def closeEvent(self, e):

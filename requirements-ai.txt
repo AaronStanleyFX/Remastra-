@@ -1,0 +1,3 @@
+# Moteurs IA (installés après PyTorch)
+demucs>=4.0.1
+deepfilternet>=0.5.6

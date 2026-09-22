@@ -19,8 +19,6 @@ Audio remastering software for music, dubbing, voice and video soundtracks.
 
 The interface is available in **English** and **French**: pick your language each time REMASTRA starts.
 
-<p align="center"><img src="docs/screenshot-language.png" alt="Language picker" width="420"></p>
-
 ## Getting started (Windows 10/11, 64-bit)
 
 1. Download `REMASTRA-vX.Y.Z-windows-x64.zip` from the **[Releases](../../releases)** page and extract it anywhere (e.g. `C:\REMASTRA`).

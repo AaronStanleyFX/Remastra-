@@ -87,31 +87,19 @@ EN: dict[str, str] = {
     # --- Débruitage -----------------------------------------------------------
     "Débruitage IA": "AI Denoise",
     "Supprime proprement le bruit derrière la voix : souffle, ventilation, trafic, réverbération de "
-    "bruit, ronflement secteur, clics. Le moteur « Isolation voix » retire même la musique et les "
-    "ambiances.":
+    "bruit, ronflement secteur, clics. Le moteur « Isolation voix » (Demucs) retire même la musique "
+    "et les ambiances.":
         "Cleanly removes the noise behind the voice: hiss, ventilation, traffic, noise reverb, mains "
-        "hum, clicks. The \"Voice isolation\" engine even removes music and ambience.",
+        "hum, clicks. The \"Voice isolation\" engine (Demucs) even removes music and ambience.",
     "Moteur": "Engine",
-    "IA Voix — DeepFilterNet 3": "AI Voice — DeepFilterNet 3",
+    "Moteur : IA Isolation voix — Demucs": "Engine: AI Voice isolation — Demucs",
     "IA Isolation voix — Demucs": "AI Voice isolation — Demucs",
-    "Spectral Pro (MMSE)": "Spectral Pro (MMSE)",
-    "Intensité": "Strength",
-    "Réduction maximale": "Maximum reduction",
     "Fond conservé (isolation)": "Background kept (isolation)",
     "Restauration": "Restoration",
     "Filtre anti-rumble (< 60 Hz)": "Rumble filter (< 60 Hz)",
     "Anti-ronflement secteur": "Mains de-hum",
     "Anti-clic / crépitements": "De-click / crackle",
     "De-esser (sifflantes)": "De-esser (sibilance)",
-    "Profil de bruit": "Noise profile",
-    "Moteur Spectral Pro : sélectionnez à la souris un passage de bruit seul sur la forme d'onde "
-    "pour un apprentissage précis. Sans sélection, le profil est estimé automatiquement. Idéal voix "
-    "/ dialogues ; pour la musique, préférez les moteurs IA ou une sélection de bruit seul.":
-        "Spectral Pro engine: drag over a noise-only passage on the waveform for accurate "
-        "learning. Without a selection, the profile is estimated automatically. Best for voice / "
-        "dialogue; for music, prefer the AI engines or a noise-only selection.",
-    "Profil : automatique": "Profile: automatic",
-    "Effacer la sélection": "Clear selection",
     "✦  Lancer le débruitage": "✦  Run denoise",
     "Débruitage": "Denoise",
     # --- Stems ----------------------------------------------------------------
@@ -173,7 +161,6 @@ EN: dict[str, str] = {
         "excellent default choice for isolating a lead vocal.",
     "Aucun stem pour l'instant.": "No stems yet.",
     "Écouter le mix des stems": "Play the stem mix",
-    "Envoyer le mix au Remaster →": "Send the mix to Remaster →",
     "STEMS PRINCIPAUX — se somment au mix d'origine": "MAIN STEMS — add up to the original mix",
     "Exporter": "Export",
     "Modèle MVSep Mega 53 stems": "MVSep Mega 53-stem model",
@@ -261,9 +248,11 @@ EN: dict[str, str] = {
     "avant": "before",
     # --- Export ---------------------------------------------------------------
     "WAV (PCM 16/24 bits, 32 bits float, RF64 > 4 Go) ou FLAC sans perte (16/24 bits). Du mono "
-    "jusqu'au Dolby Atmos 9.1.6 avec spatialisation IA.":
+    "jusqu'au Dolby Atmos 9.1.6 et DTS:X avec spatialisation IA, plus un repli Binaural pour "
+    "l'écoute au casque.":
         "WAV (16/24-bit PCM, 32-bit float, RF64 > 4 GB) or lossless FLAC (16/24-bit). From mono up "
-        "to Dolby Atmos 9.1.6 with AI spatialization.",
+        "to Dolby Atmos 9.1.6 and DTS:X with AI spatialization, plus a Binaural fold-down for "
+        "headphone listening.",
     "Master (Remaster IA)": "Master (AI Remaster)",
     "Voix / audio débruité": "Denoised voice / audio",
     "Mix des stems": "Stem mix",
@@ -291,6 +280,12 @@ EN: dict[str, str] = {
     "14 canaux — 7.1 + 6 hauteurs (Dolby Atmos bed)": "14 channels — 7.1 + 6 heights (Dolby Atmos bed)",
     "16 canaux — 7.1.6 + Wides (Dolby Atmos bed étendu)":
         "16 channels — 7.1.6 + Wides (extended Dolby Atmos bed)",
+    "12 canaux — 7.1 + 4 hauteurs (bed immersif objet DTS:X)":
+        "12 channels — 7.1 + 4 heights (DTS:X object-based immersive bed)",
+    "2 canaux — repli binaural casque (indices ITD/ILD, spectraux et de décorrélation "
+    "simulant profondeur et hauteur ; pas de convolution HRTF mesurée)":
+        "2 channels — binaural headphone fold-down (ITD/ILD, spectral and decorrelation "
+        "cues simulating depth and height; not measured-HRTF convolution)",
     "Séparez d'abord les stems (étape ③).": "Separate the stems first (step ③).",
     "Dossier de destination des stems": "Destination folder for the stems",
     "Export des stems": "Stem export",
@@ -305,17 +300,10 @@ EN: dict[str, str] = {
     "▲ AVANT": "▲ FRONT", "Horizontal": "Horizontal", "Hauteur": "Height",
     # --- Messages moteur (exacts) ---------------------------------------------
     "Format non supporté et FFmpeg introuvable.": "Unsupported format and FFmpeg not found.",
-    "Chargement du modèle DeepFilterNet 3…": "Loading the DeepFilterNet 3 model…",
     "Filtre anti-rumble (HPF 60 Hz, 24 dB/oct)": "Rumble filter (HPF 60 Hz, 24 dB/oct)",
     "Aucun ronflement secteur détecté": "No mains hum detected",
     "Anti-clic": "De-click",
-    "DeepFilterNet 3 : rehaussement neuronal de la voix…": "DeepFilterNet 3: neural speech enhancement…",
-    "⚠ DeepFilterNet non installé → bascule sur Spectral Pro":
-        "⚠ DeepFilterNet not installed → falling back to Spectral Pro",
     "Demucs : isolation de la voix…": "Demucs: isolating the voice…",
-    "⚠ Demucs non installé → bascule sur Spectral Pro":
-        "⚠ Demucs not installed → falling back to Spectral Pro",
-    "Spectral Pro : estimation MMSE du bruit…": "Spectral Pro: MMSE noise estimation…",
     "De-esser": "De-esser",
     "Spatialisation objet à partir des stems IA…": "Object spatialization from the AI stems…",
     "Upmix spectral direct/ambiance…": "Spectral direct/ambience upmix…",
@@ -358,10 +346,6 @@ EN: dict[str, str] = {
 # Motifs dynamiques (regex FR → gabarit EN ; les groupes sont re-traduits avec tr())
 _PATTERNS = [(re.compile(a, re.S), b) for a, b in [
     (r"Anti-ronflement (\d+) Hz \+ 8 harmoniques", "De-hum {0} Hz + 8 harmonics"),
-    (r"⚠ DeepFilterNet indisponible \((.*)\) → bascule sur Spectral Pro",
-     "⚠ DeepFilterNet unavailable ({0}) → falling back to Spectral Pro"),
-    (r"⚠ Demucs indisponible \((.*)\) → bascule sur Spectral Pro",
-     "⚠ Demucs unavailable ({0}) → falling back to Spectral Pro"),
     (r"Rééchantillonnage (\d+) → (\d+) Hz \(SoX VHQ\)", "Resampling {0} → {1} Hz (SoX VHQ)"),
     (r"Rééchantillonnage (\d+) → (\d+) Hz pour le traitement", "Resampling {0} → {1} Hz for processing"),
     (r"FLAC limité à 8 canaux → export multi-mono \((\d+) fichiers\)",

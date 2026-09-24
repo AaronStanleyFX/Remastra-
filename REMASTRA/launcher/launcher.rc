@@ -4,8 +4,8 @@
 1 24 "remastra.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,5,0,0
-PRODUCTVERSION  1,5,0,0
+FILEVERSION     1,5,5,0
+PRODUCTVERSION  1,5,5,0
 FILEOS          VOS_NT_WINDOWS32
 FILETYPE        VFT_APP
 BEGIN
@@ -15,11 +15,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName",      "REMASTRA"
       VALUE "FileDescription",  "REMASTRA - AI Audio Remaster Studio"
-      VALUE "FileVersion",      "1.5.0"
+      VALUE "FileVersion",      "1.5.5"
       VALUE "InternalName",     "Remastra"
       VALUE "OriginalFilename", "Remastra.exe"
       VALUE "ProductName",      "REMASTRA"
-      VALUE "ProductVersion",   "1.5.0"
+      VALUE "ProductVersion",   "1.5.5"
     END
   END
   BLOCK "VarFileInfo"

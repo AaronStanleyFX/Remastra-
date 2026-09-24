@@ -82,7 +82,6 @@ class MainWindow(QMainWindow):
         self.stem_ctrl: dict[str, dict] = {}
         self.master_res = None
         self.reference = None
-        self.noise_sel = None
         self.worker = None
         self.preview_files: dict[str, str] = {}
         self.listen = "Original"
@@ -325,27 +324,17 @@ class MainWindow(QMainWindow):
         self._page_header(v, tr("Débruitage IA"),
                           tr("Supprime proprement le bruit derrière la voix : souffle, ventilation, "
                           "trafic, réverbération de bruit, ronflement secteur, clics. Le moteur "
-                          "« Isolation voix » retire même la musique et les ambiances."), "NEURAL")
-        row = QHBoxLayout()
-        row.setSpacing(14)
+                          "« Isolation voix » (Demucs) retire même la musique et les ambiances."),
+                          "NEURAL")
         c = card()
         g = QGridLayout(c)
         g.setContentsMargins(18, 16, 18, 16)
         g.setHorizontalSpacing(24)
         g.setVerticalSpacing(14)
-        g.addWidget(label(tr("Moteur"), "H2"), 0, 0)
-        self.dn_engine = QComboBox()
-        fill(self.dn_engine, denoise.ENGINES)
-        g.addWidget(self.dn_engine, 0, 1)
-        self.dn_strength = LabeledSlider(tr("Intensité"), 0, 100, 80, " %")
-        self.dn_reduction = LabeledSlider(tr("Réduction maximale"), 6, 60, 30, " dB")
+        g.addWidget(label(tr("Moteur : IA Isolation voix — Demucs"), "H2"), 0, 0, 1, 2)
         self.dn_residual = LabeledSlider(tr("Fond conservé (isolation)"), -60, 0, -60, " dB")
-        g.addWidget(self.dn_strength, 1, 0)
-        g.addWidget(self.dn_reduction, 1, 1)
-        g.addWidget(self.dn_residual, 2, 0)
-        self.dn_engine.currentIndexChanged.connect(self._dn_engine_changed)
-        self._dn_engine_changed()
-        g.addWidget(label(tr("Restauration"), "H2"), 3, 0, 1, 2)
+        g.addWidget(self.dn_residual, 1, 0)
+        g.addWidget(label(tr("Restauration"), "H2"), 2, 0, 1, 2)
         self.dn_rumble = QCheckBox(tr("Filtre anti-rumble (< 60 Hz)"))
         self.dn_rumble.setChecked(True)
         self.dn_hum = QCheckBox(tr("Anti-ronflement secteur"))
@@ -354,43 +343,20 @@ class MainWindow(QMainWindow):
         fill(self.dn_humf, ["Auto", "50 Hz", "60 Hz"])
         self.dn_click = QCheckBox(tr("Anti-clic / crépitements"))
         self.dn_deess = QCheckBox(tr("De-esser (sifflantes)"))
-        g.addWidget(self.dn_rumble, 4, 0)
+        g.addWidget(self.dn_rumble, 3, 0)
         hh = QHBoxLayout()
         hh.addWidget(self.dn_hum)
         hh.addWidget(self.dn_humf)
         hh.addStretch()
-        g.addLayout(hh, 4, 1)
-        g.addWidget(self.dn_click, 5, 0)
-        g.addWidget(self.dn_deess, 5, 1)
-        row.addWidget(c, 3)
-
-        c2 = card()
-        c2l = QVBoxLayout(c2)
-        c2l.setContentsMargins(18, 16, 18, 16)
-        c2l.addWidget(label(tr("Profil de bruit"), "H2"))
-        c2l.addWidget(label(tr("Moteur Spectral Pro : sélectionnez à la souris un passage de bruit "
-                            "seul sur la forme d'onde pour un apprentissage précis. Sans sélection, "
-                            "le profil est estimé automatiquement. Idéal voix / dialogues ; pour la "
-                            "musique, préférez les moteurs IA ou une sélection de bruit seul."), "Muted", True))
-        self.lbl_profile = label(tr("Profil : automatique"), None)
-        self.lbl_profile.setStyleSheet(f"color:{T.ACCENT3}; font-weight:700;")
-        c2l.addWidget(self.lbl_profile)
-        b = QPushButton(tr("Effacer la sélection"))
-        b.clicked.connect(self._clear_sel)
-        c2l.addWidget(b)
-        c2l.addStretch()
+        g.addLayout(hh, 3, 1)
+        g.addWidget(self.dn_click, 4, 0)
+        g.addWidget(self.dn_deess, 4, 1)
         self.btn_denoise = QPushButton(tr("✦  Lancer le débruitage"), objectName="Primary")
         self.btn_denoise.clicked.connect(self.run_denoise)
-        c2l.addWidget(self.btn_denoise)
-        row.addWidget(c2, 2)
-        v.addLayout(row)
+        g.addWidget(self.btn_denoise, 5, 0, 1, 2)
+        v.addWidget(c)
         v.addStretch()
         return w
-
-    def _dn_engine_changed(self, *_):
-        iso = (self.dn_engine.currentData() or "").startswith("IA Isolation")
-        self.dn_residual.setEnabled(iso)
-        self.dn_reduction.setEnabled((self.dn_engine.currentData() or "").startswith("Spectral"))
 
     # ------------------------------------------------------------- Stems --
     def _page_stems(self):
@@ -423,6 +389,9 @@ class MainWindow(QMainWindow):
         self.btn_stems = QPushButton(tr("✦  Séparer les stems"), objectName="Primary")
         self.btn_stems.clicked.connect(self.run_stems)
         g.addWidget(self.btn_stems, 0, 5)
+        self.btn_stem_mix = QPushButton(tr("Écouter le mix des stems"))
+        self.btn_stem_mix.clicked.connect(self.update_stem_mix)
+        g.addWidget(self.btn_stem_mix, 0, 6)
         g.setColumnStretch(4, 1)
 
         # Options Demucs
@@ -481,15 +450,6 @@ class MainWindow(QMainWindow):
         self.stems_lay.setSpacing(8)
         self.stems_lay.addWidget(label(tr("Aucun stem pour l'instant."), "Muted"))
         v.addWidget(self.stems_box)
-        hb = QHBoxLayout()
-        self.btn_stem_mix = QPushButton(tr("Écouter le mix des stems"))
-        self.btn_stem_mix.clicked.connect(self.update_stem_mix)
-        self.btn_stem_to_master = QPushButton(tr("Envoyer le mix au Remaster →"))
-        self.btn_stem_to_master.clicked.connect(self._stem_mix_to_master)
-        hb.addWidget(self.btn_stem_mix)
-        hb.addWidget(self.btn_stem_to_master)
-        hb.addStretch()
-        v.addLayout(hb)
         v.addStretch()
         return w
 
@@ -710,7 +670,8 @@ class MainWindow(QMainWindow):
         v.setSpacing(14)
         self._page_header(v, "Export",
                           tr("WAV (PCM 16/24 bits, 32 bits float, RF64 > 4 Go) ou FLAC sans perte "
-                          "(16/24 bits). Du mono jusqu'au Dolby Atmos 9.1.6 avec spatialisation IA."),
+                          "(16/24 bits). Du mono jusqu'au Dolby Atmos 9.1.6 et DTS:X avec "
+                          "spatialisation IA, plus un repli Binaural pour l'écoute au casque."),
                           "LOSSLESS")
         row = QHBoxLayout()
         row.setSpacing(14)
@@ -862,15 +823,11 @@ class MainWindow(QMainWindow):
         self._on_pos(sec * 1000)
 
     def _on_selection(self, a, b):
-        self.noise_sel = (a, b)
         self.lbl_sel.setText(tr("Sélection : {a} → {b}").format(a=fmt_time(a), b=fmt_time(b)))
-        self.lbl_profile.setText(tr("Profil : sélection {a}s – {b}s").format(a=f"{a:.2f}", b=f"{b:.2f}"))
 
     def _clear_sel(self):
-        self.noise_sel = None
         self.wave.sel = None
         self.wave.update()
-        self.lbl_profile.setText(tr("Profil : automatique"))
         self.lbl_sel.setText(tr("Astuce : cliquez pour vous déplacer, glissez pour sélectionner"))
 
     # ============================================================ Actions ==
@@ -890,7 +847,6 @@ class MainWindow(QMainWindow):
         for b in (self.btn_denoise, self.btn_stems, self.btn_master, self.btn_export):
             b.setEnabled(has and not busy)
         self.btn_stem_mix.setEnabled(bool(self.stems) and not busy)
-        self.btn_stem_to_master.setEnabled(bool(self.stems) and not busy)
 
     def _run(self, fn, on_done, *args, title=None, **kw):
         title = title or tr("Traitement")
@@ -933,7 +889,7 @@ class MainWindow(QMainWindow):
                     vram = torch.cuda.get_device_properties(0).total_memory / 2 ** 30
             except Exception:
                 pass
-            return {"df": denoise.deepfilter_available(), "demucs": stems.demucs_available(),
+            return {"demucs": stems.demucs_available(),
                     "mega": mega.available(), "dev": dev, "vram": vram}
 
         def done(r):
@@ -942,13 +898,11 @@ class MainWindow(QMainWindow):
                 f"{ok(r['mega'] and bool(self.roformer_ckpt.get(mid)))} {tr(mega.REGISTRY[mid]['label_fr'])}<br>"
                 for mid in mega.MODEL_IDS)
             self.lbl_engines.setText(
-                f"{ok(r['df'])} DeepFilterNet 3<br>{ok(r['demucs'])} Demucs v4 (8 stems)<br>"
+                f"{ok(r['demucs'])} Demucs v4 (8 stems + isolation voix)<br>"
                 f"{ro_lines}"
-                f"<span style='color:{T.OK}'>●</span> Spectral Pro / Master DSP<br>"
+                f"<span style='color:{T.OK}'>●</span> Master DSP<br>"
                 f"<span style='color:{T.MUTED}'>" + tr("Calcul : {d}").format(d=r['dev'].upper())
                 + (f" · {r['vram']:.0f} {tr('Go')} VRAM" if r["vram"] else "") + "</span>")
-            if not r["df"]:
-                self.dn_engine.setCurrentIndex(1 if r["demucs"] else 2)
             if r["vram"]:
                 self.st_mem.setCurrentIndex(0 if r["vram"] >= 15 else 1 if r["vram"] >= 10 else 2)
             else:
@@ -1041,11 +995,10 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------- Denoise --
     def run_denoise(self):
         cfg = denoise.DenoiseSettings(
-            engine=self.dn_engine.currentData(), strength=self.dn_strength.value(),
-            max_reduction_db=self.dn_reduction.value(), residual_db=self.dn_residual.value(),
+            residual_db=self.dn_residual.value(),
             dehum=self.dn_hum.isChecked(), hum_freq=self.dn_humf.currentData(),
             declick=self.dn_click.isChecked(), rumble_hp=self.dn_rumble.isChecked(),
-            deess=self.dn_deess.isChecked(), noise_profile=self.noise_sel)
+            deess=self.dn_deess.isChecked())
         src = self.audio["Original"]
         self._run(denoise.process, lambda y: self._set_stage("Débruité", y), src, self.sr, cfg,
                   title=tr("Débruitage"))
@@ -1103,11 +1056,6 @@ class MainWindow(QMainWindow):
         m = self.stem_mix()
         if m is not None:
             self._set_stage("Mix stems", m)
-
-    def _stem_mix_to_master(self):
-        self.update_stem_mix()
-        select(self.m_src, "Mix stems")
-        self._nav[3].click()
 
     def export_single_stem(self, name):
         p, _ = QFileDialog.getSaveFileName(self, tr("Exporter le stem"),
@@ -1181,7 +1129,7 @@ class MainWindow(QMainWindow):
         cfg = self._export_cfg()
         src = self.x_src.currentData()
         ext = ".wav" if cfg.fmt == "WAV" else ".flac"
-        tag = cfg.layout.replace("é", "e").replace(".", "")
+        tag = cfg.layout.replace("é", "e").replace(".", "").replace(":", "-")
         if src.startswith("Stems séparés"):
             if not self.stems:
                 QMessageBox.information(self, "REMASTRA", tr("Séparez d'abord les stems (étape ③)."))

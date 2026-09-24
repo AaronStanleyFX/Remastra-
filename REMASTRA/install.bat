@@ -27,7 +27,7 @@ if "%L%"=="en" (
   set "T_UI=[3/5] Installing the interface and the audio engine..."
   set "T_TORCH=[4/5] Installing PyTorch - large download, please wait..."
   set "T_TORCHERR=  * PyTorch could not be installed: the AI engines will be disabled."
-  set "T_AI=[5/5] Installing the AI engines - Demucs v4, DeepFilterNet 3, BS-RoFormer..."
+  set "T_AI=[5/5] Installing the AI engines - Demucs v4, BS-RoFormer..."
   set "T_AIERR=  * Some AI engines could not be installed - see install_log.txt"
   set "T_MODELS=  Downloading the AI models..."
   set "T_DONE=  Installation complete. REMASTRA is starting."
@@ -45,7 +45,7 @@ if "%L%"=="en" (
   set "T_UI=[3/5] Installation de l'interface et du moteur audio..."
   set "T_TORCH=[4/5] Installation de PyTorch - volumineux, patience..."
   set "T_TORCHERR=  * PyTorch n'a pas pu etre installe : les moteurs IA seront desactives."
-  set "T_AI=[5/5] Installation des moteurs IA - Demucs v4, DeepFilterNet 3, BS-RoFormer..."
+  set "T_AI=[5/5] Installation des moteurs IA - Demucs v4, BS-RoFormer..."
   set "T_AIERR=  * Certains moteurs IA n'ont pas pu etre installes - voir install_log.txt"
   set "T_MODELS=  Pre-telechargement des modeles IA..."
   set "T_DONE=  Installation terminee. REMASTRA demarre."
@@ -130,7 +130,6 @@ if errorlevel 1 echo !T_AIERR!
 
 echo !T_MODELS!
 "%VPY%" -c "from remastra.core import stems; stems._get_model('htdemucs_6s'); stems._get_model('htdemucs'); print('  Demucs OK')" 2>> "%LOG%"
-"%VPY%" -c "from remastra.core import denoise; import numpy as np; denoise.deepfilter_denoise(np.zeros((1,48000),'float32'),48000); print('  DeepFilterNet OK')" 2>> "%LOG%"
 
 :ready
 echo ok> runtime\.ready

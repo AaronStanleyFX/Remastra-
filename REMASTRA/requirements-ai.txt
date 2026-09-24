@@ -1,6 +1,5 @@
 # Moteurs IA (installés après PyTorch)
 demucs>=4.0.1
-deepfilternet>=0.5.6
 # BS-RoFormer (MVSep Mega 53 stems, aufr33 male/female, viperx BS-RoFormer-1296)
 einops>=0.7
 beartype>=0.16

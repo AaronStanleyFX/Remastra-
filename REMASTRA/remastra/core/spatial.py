@@ -26,6 +26,8 @@ LAYOUTS: dict[str, list[str]] = {
               "Ltf", "Rtf", "Ltm", "Rtm", "Ltr", "Rtr"],
     "9.1.6": ["L", "R", "C", "LFE", "Lrs", "Rrs", "Lss", "Rss", "Lw", "Rw",
               "Ltf", "Rtf", "Ltm", "Rtm", "Ltr", "Rtr"],
+    "DTS:X": ["L", "R", "C", "LFE", "Lrs", "Rrs", "Lss", "Rss", "Ltf", "Rtf", "Ltr", "Rtr"],
+    "Binaural": ["L", "R"],
 }
 LAYOUT_DESC = {
     "Mono": "1 canal — C",
@@ -36,6 +38,10 @@ LAYOUT_DESC = {
     "7.1": "8 canaux — L R C LFE Lrs Rrs Lss Rss",
     "7.1.6": "14 canaux — 7.1 + 6 hauteurs (Dolby Atmos bed)",
     "9.1.6": "16 canaux — 7.1.6 + Wides (Dolby Atmos bed étendu)",
+    "DTS:X": "12 canaux — 7.1 + 4 hauteurs (bed immersif objet DTS:X)",
+    "Binaural": "2 canaux — repli binaural casque (indices ITD/ILD, spectraux et de "
+                "décorrélation simulant profondeur et hauteur ; pas de convolution HRTF "
+                "mesurée)",
 }
 
 # dwChannelMask WAVE_FORMAT_EXTENSIBLE
@@ -47,7 +53,7 @@ _SPK = {"L": 0x1, "R": 0x2, "C": 0x4, "LFE": 0x8, "Lrs": 0x10, "Rrs": 0x20,
 def channel_mask(layout: str) -> int:
     if layout == "Mono":
         return 0x4
-    if layout in ("Stéréo", "2.0"):
+    if layout in ("Stéréo", "2.0", "Binaural"):
         return 0x3
     if layout == "2.1":
         return 0x3 | 0x8
@@ -55,7 +61,7 @@ def channel_mask(layout: str) -> int:
         return 0x3F      # FL FR FC LFE BL BR (5.1 WAVE standard)
     if layout == "7.1":
         return 0x63F     # FL FR FC LFE BL BR SL SR
-    return 0             # 7.1.6 / 9.1.6 : hauteurs médianes hors masque -> ordre documenté
+    return 0             # 7.1.6 / 9.1.6 / DTS:X : hauteurs hors masque -> ordre documenté
 
 
 def _lp(x, sr, fc, order=4):
@@ -130,7 +136,7 @@ def _render(layout, sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r, wide
             ch["Lss"], ch["Rss"] = amb_l * 0.7, amb_r * 0.7
             ch["Lrs"] = _decorrelate(amb_l, sr, 11, 18) * 0.6
             ch["Rrs"] = _decorrelate(amb_r, sr, 12, 19) * 0.6
-        if layout in ("7.1.6", "9.1.6"):
+        if layout in ("7.1.6", "9.1.6", "DTS:X"):
             hl, hr = _hp(height_l, sr, 250, 2), _hp(height_r, sr, 250, 2)
             ch["Ltf"], ch["Rtf"] = hl * 0.5, hr * 0.5
             ch["Ltm"] = _decorrelate(hl, sr, 21, 7) * 0.4
@@ -142,6 +148,34 @@ def _render(layout, sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r, wide
             wr = wide_r if wide_r is not None else (R + amb_r) * 0.5
             ch["Lw"], ch["Rw"] = wl * 0.6, wr * 0.6
     return np.stack([ch[k] for k in names]).astype(np.float32)
+
+
+def _binaural(sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r):
+    """Repli casque 2 canaux à partir de la scène 3D placée (objets ou upmix spectral).
+
+    Ce n'est pas une convolution HRTF mesurée (pas de base SOFA embarquée) : c'est un
+    repli psychoacoustique simplifié qui simule profondeur (indices ITD/ILD + diffusion
+    inter-auriculaire réduite pour l'arrière) et hauteur (rehaussement spectral 7-9 kHz,
+    indice pinna classique) à partir des mêmes bus L/R/C/ambiance/hauteur/LFE que les
+    formats enceintes.
+    """
+    itd = max(1, int(0.00035 * sr))     # ~0,35 ms — décalage interaural pour le contenu latéral
+    front_l = L + C * 0.7071
+    front_r = R + C * 0.7071
+    cross = 0.15                        # léger crossfeed frontal (image casque plus naturelle)
+    front_l, front_r = front_l + cross * front_r, front_r + cross * front_l
+    # Arrière / ambiance : diffusion + repli spectral (indice « derrière ») + fuite controlatérale retardée
+    amb_l_d = _lp(_decorrelate(amb_l, sr, 31, 9), sr, 6500.0, 2)
+    amb_r_d = _lp(_decorrelate(amb_r, sr, 32, 10), sr, 6500.0, 2)
+    surround_l = amb_l_d + 0.25 * np.roll(amb_r_d, itd)
+    surround_r = amb_r_d + 0.25 * np.roll(amb_l_d, itd)
+    # Hauteur : indice spectral (bosse pinna ~7-9 kHz)
+    height_l_e = height_l + 0.35 * _hp(height_l, sr, 7000.0, 2)
+    height_r_e = height_r + 0.35 * _hp(height_r, sr, 7000.0, 2)
+    lfe = _lp(lfe_src, sr, 120.0, 8) * 0.5   # LFE non directionnel : identique aux deux oreilles
+    out_l = front_l + 0.6 * surround_l + 0.5 * height_l_e + lfe
+    out_r = front_r + 0.6 * surround_r + 0.5 * height_r_e + lfe
+    return np.stack([out_l, out_r]).astype(np.float32)
 
 
 def upmix(audio: np.ndarray, sr: int, layout: str, stems: dict | None = None,
@@ -183,13 +217,22 @@ def upmix(audio: np.ndarray, sr: int, layout: str, stems: dict | None = None,
         height_l, height_r = al * 0.7 + sl * 0.5 + dl * 0.15, ar * 0.7 + sr_ * 0.5 + dr * 0.15
         lfe_src = (bl + br) / 2 + (dl + dr) / 2 * 0.5
         wide_l, wide_r = gl * 0.4 + yl * 0.4 + sl * 0.3, gr * 0.4 + yr * 0.4 + sr_ * 0.3
-        out = _render(layout, sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r, wide_l, wide_r)
+        if layout == "Binaural":
+            out = _binaural(sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r)
+        else:
+            out = _render(layout, sr, L, R, C, amb_l, amb_r, lfe_src, height_l, height_r,
+                          wide_l, wide_r)
     else:  # --- upmix spectral ----------------------------------------------
         C, Ld, Rd, La, Ra = _primary_ambient(st, sr)
         amb_l = _decorrelate(La, sr, 3, 10)
         amb_r = _decorrelate(Ra, sr, 4, 11)
-        out = _render(layout, sr, Ld + La * 0.3, Rd + Ra * 0.3, C, amb_l, amb_r,
-                      st.mean(axis=0), La + Ld * 0.1, Ra + Rd * 0.1)
+        Lm, Rm = Ld + La * 0.3, Rd + Ra * 0.3
+        lfe_src = st.mean(axis=0)
+        height_l, height_r = La + Ld * 0.1, Ra + Rd * 0.1
+        if layout == "Binaural":
+            out = _binaural(sr, Lm, Rm, C, amb_l, amb_r, lfe_src, height_l, height_r)
+        else:
+            out = _render(layout, sr, Lm, Rm, C, amb_l, amb_r, lfe_src, height_l, height_r)
 
     # Préservation du niveau : ramène la crête au niveau du master
     ref_pk = float(np.max(np.abs(st))) + 1e-9

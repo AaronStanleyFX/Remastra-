@@ -139,8 +139,16 @@ def export(path: str, audio: np.ndarray, sr: int, cfg: ExportSettings,
     return save(path, out, cfg, log)
 
 
+def _fs_safe(name: str) -> str:
+    """Nom de format sûr pour un nom de fichier (Windows interdit : \\ / : * ? " < > |)."""
+    for ch in '\\/:*?"<>|':
+        name = name.replace(ch, "-")
+    return name
+
+
 def save(path: str, out: np.ndarray, cfg: ExportSettings, log=_noop) -> list[str]:
     names = spatial.LAYOUTS[cfg.layout]
+    safe_layout = _fs_safe(cfg.layout)
     base, _ = os.path.splitext(path)
     written: list[str] = []
     if cfg.fmt == "WAV":
@@ -153,7 +161,7 @@ def save(path: str, out: np.ndarray, cfg: ExportSettings, log=_noop) -> list[str
             write_flac(p, out, cfg.samplerate, cfg.bits, cfg.dither)
             written.append(p)
         else:
-            folder = base + f"_{cfg.layout}_FLAC"
+            folder = base + f"_{safe_layout}_FLAC"
             os.makedirs(folder, exist_ok=True)
             log(f"FLAC limité à 8 canaux → export multi-mono ({out.shape[0]} fichiers)")
             stem_name = os.path.basename(base)
@@ -162,7 +170,7 @@ def save(path: str, out: np.ndarray, cfg: ExportSettings, log=_noop) -> list[str
                 write_flac(p, out[i: i + 1], cfg.samplerate, cfg.bits, cfg.dither)
                 written.append(p)
     if len(names) > 2:
-        txt = base + f"_{cfg.layout}_channels.txt"
+        txt = base + f"_{safe_layout}_channels.txt"
         with open(txt, "w", encoding="utf-8") as fh:
             fh.write(tr("REMASTRA — format {l} ({n} canaux)").format(l=tr(cfg.layout), n=len(names)) + "\n")
             fh.write(f"{tr(spatial.LAYOUT_DESC[cfg.layout])}\n\n{tr('Ordre des canaux :')}\n")

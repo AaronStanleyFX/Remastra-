@@ -145,14 +145,14 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR pCmd, int nShow) {
         int r = MessageBoxW(NULL,
             S(L"Bienvenue dans REMASTRA !\n\n"
               L"Premier lancement : les composants doivent être installés\n"
-              L"(Python, interface, moteurs IA Demucs, DeepFilterNet, BS-RoFormer).\n\n"
+              L"(Python, interface, moteurs IA Demucs, BS-RoFormer).\n\n"
               L"• Connexion Internet requise\n"
               L"• Espace disque : environ 3 à 6 Go\n"
               L"• Durée : 5 à 20 minutes selon la connexion\n\n"
               L"Lancer l'installation maintenant ?",
               L"Welcome to REMASTRA!\n\n"
               L"First launch: the components need to be installed\n"
-              L"(Python, user interface, Demucs, DeepFilterNet and BS-RoFormer AI engines).\n\n"
+              L"(Python, user interface, Demucs and BS-RoFormer AI engines).\n\n"
               L"• Internet connection required\n"
               L"• Disk space: about 3 to 6 GB\n"
               L"• Time: 5 to 20 minutes depending on your connection\n\n"
